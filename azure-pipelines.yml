@@ -1,0 +1,102 @@
+# CI for Azure DevOps. In this repository the project lives in AI-Repo/RAG of the D:/Repos repo:
+# create a pipeline from this file (Pipelines > New > Azure Repos Git > Existing YAML file > /AI-Repo/RAG/azure-pipelines.yml).
+trigger:
+  branches:
+    include: ["*"]
+  paths:
+    include: ["AI-Repo/RAG/*"]
+pr:
+  paths:
+    include: ["AI-Repo/RAG/*"]
+
+variables:
+  PROJECT_DIR: AI-Repo/RAG
+  PIP_CACHE_DIR: $(Pipeline.Workspace)/.pip
+  HF_HOME: $(Pipeline.Workspace)/.hf
+
+resources:
+  containers:
+    - container: qdrant
+      image: qdrant/qdrant:latest
+      ports: ["6333:6333"]
+    - container: postgres
+      image: pgvector/pgvector:pg16
+      env:
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: rag
+      ports: ["5432:5432"]
+
+jobs:
+  - job: tests
+    timeoutInMinutes: 40
+    pool:
+      vmImage: ubuntu-latest
+    services:  # real Qdrant and pgvector, so tests/test_live_servers.py runs instead of skipping
+      qdrant: qdrant
+      postgres: postgres
+    variables:
+      QDRANT_URL: http://localhost:6333
+      PG_DSN: postgresql://postgres:postgres@localhost:5432/rag
+    steps:
+      - task: UsePythonVersion@0
+        inputs:
+          versionSpec: "3.11"
+      - task: Cache@2
+        displayName: Cache pip downloads
+        inputs:
+          key: 'pip | "$(Agent.OS)" | $(PROJECT_DIR)/requirements.txt'
+          path: $(PIP_CACHE_DIR)
+      - task: Cache@2
+        displayName: Cache embedding / reranker models
+        inputs:
+          key: 'hf | "$(Agent.OS)" | minilm-ms-marco'
+          path: $(HF_HOME)
+      - script: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -r requirements.txt
+          pip uninstall -y opencv-python && pip install opencv-python-headless  # OCR without X11 libraries
+          pip install -e .
+        displayName: Install dependencies (CPU-only PyTorch)
+        workingDirectory: $(PROJECT_DIR)
+      - script: |
+          # An undefined pipeline variable arrives as the literal text "$(NAME)": treat it as unset.
+          for v in OPENAI_API_KEY ANTHROPIC_API_KEY; do
+            case "${!v}" in '$('*) unset "$v";; esac
+          done
+          python -m pytest -q -rs --junitxml=test-results.xml
+        displayName: Run tests
+        workingDirectory: $(PROJECT_DIR)
+        env:
+          # Live LLM tests run only if these pipeline secret variables are defined; otherwise they skip.
+          OPENAI_API_KEY: $(OPENAI_API_KEY)
+          ANTHROPIC_API_KEY: $(ANTHROPIC_API_KEY)
+      - task: PublishTestResults@2
+        condition: always()
+        inputs:
+          testResultsFiles: $(PROJECT_DIR)/test-results.xml
+          testRunTitle: RAG tests
+
+  - job: web
+    timeoutInMinutes: 15
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: "24.x"
+      - script: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm test
+          npm run build
+        displayName: Web UI - typecheck, test, build
+        workingDirectory: $(PROJECT_DIR)/web
+
+  - job: docker
+    timeoutInMinutes: 30
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - script: docker build -t rag-api:ci .
+        displayName: Build the API image
+        workingDirectory: $(PROJECT_DIR)

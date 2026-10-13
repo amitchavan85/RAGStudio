@@ -1,0 +1,11 @@
+{"id": "global-growth-forecast", "type": "lookup", "question": "What is global growth forecast to slow to this year?", "evidence": [[["content.pdf", 5]]], "facts": ["2.5"]}
+{"id": "severe-scenario-growth", "type": "lookup", "question": "How low could global growth fall in 2026 if energy disruptions are more severe and accompanied by financial stress?", "evidence": [[["content.pdf", 7]]], "facts": ["1.3"]}
+{"id": "severe-scenario-inflation", "type": "lookup", "question": "What would global inflation rise to in the severe energy disruption scenario?", "evidence": [[["content.pdf", 7]]], "facts": ["4.4"]}
+{"id": "us-ai-adoption", "type": "lookup", "question": "What share of firms in the United States are using AI?", "evidence": [[["content.pdf", 12]]], "facts": ["one-fifth|one fifth|20 percent"]}
+{"id": "small-ai", "type": "semantic", "question": "What is meant by small AI?", "evidence": [[["content.pdf", 12]]], "facts": ["efficiency|localized"]}
+{"id": "euro-area-growth", "type": "lookup", "question": "What growth rate is the euro area expected to recover to over 2027-28?", "evidence": [[["content.pdf", 19]]], "facts": ["1.3"]}
+{"id": "japan-growth-2026", "type": "lookup", "question": "What is Japan's growth projected to decelerate to in 2026?", "evidence": [[["content.pdf", 19]]], "facts": ["0.7"]}
+{"id": "young-people-working-age", "type": "lookup", "question": "How many young people in EMDEs are set to reach working age over the next decade?", "evidence": [[["content.pdf", 22]]], "facts": ["1.2 billion"]}
+{"id": "per-capita-convergence", "type": "semantic", "question": "When are per capita income levels in EMDEs excluding China and India expected to regain their 2019 relative position?", "evidence": [[["content.pdf", 30]]], "facts": ["2028"]}
+{"id": "central-banks-ai", "type": "semantic", "question": "What new development should central banks monitor for its implications for inflation and monetary policy?", "evidence": [[["content.pdf", 36]]], "facts": ["ai"]}
+{"id": "na-mars-gdp", "type": "unanswerable", "question": "What is the projected GDP of Mars in 2030?", "answerable": false}

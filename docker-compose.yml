@@ -1,0 +1,32 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports: ["6333:6333"]
+    volumes: ["qdrant_data:/qdrant/storage"]
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rag
+    ports: ["5432:5432"]
+    volumes: ["pg_data:/var/lib/postgresql/data"]
+  # RAG API. Start with: docker compose up -d --build api   (docs: http://localhost:8000/docs)
+  api:
+    build: .
+    profiles: ["api"]          # not started by a plain `docker compose up`; use --profile api or name it
+    env_file: .env
+    environment:               # these override .env: container paths + service names on the compose network
+      QDRANT_URL: http://qdrant:6333
+      PG_DSN: postgresql://postgres:postgres@postgres:5432/rag
+      DATA_DIR: /data
+      LOG_DIR: /data/logs
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      OLLAMA_URL: http://host.docker.internal:11434   # Ollama running on the host machine
+    ports: ["8000:8000"]
+    volumes: ["api_data:/data"]
+    depends_on: [qdrant, postgres]
+volumes:
+  qdrant_data:
+  pg_data:
+  api_data:

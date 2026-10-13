@@ -1,0 +1,11 @@
+.env
+.git
+.rag_data
+logs
+tests
+**/__pycache__
+*.egg-info
+src/data/pdfs
+web/node_modules
+web/dist
+web/openapi.json

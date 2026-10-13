@@ -1,0 +1,30 @@
+{"id": "usa-gdp-2023", "type": "table", "question": "What was the nominal GDP of the United States in 2023?", "evidence": [[["usa_gdp_report.pdf", 1], ["global_gdp_comparison.pdf", 1]]], "facts": ["27,360|27360|27.36 trillion"]}
+{"id": "ind-growth-2021", "type": "table", "question": "What was India's real GDP growth rate in 2021?", "evidence": [[["ind_gdp_report.pdf", 1]]], "facts": ["9.7"]}
+{"id": "chn-gdp-2020", "type": "table", "question": "How large was China's nominal GDP in 2020 in USD billions?", "evidence": [[["chn_gdp_report.pdf", 1], ["global_gdp_comparison.pdf", 1]]], "facts": ["14,690|14690"]}
+{"id": "gbr-growth-2020", "type": "table", "question": "By how much did the UK economy contract in 2020?", "evidence": [[["gbr_gdp_report.pdf", 1]]], "facts": ["10.4"]}
+{"id": "deu-growth-2023", "type": "table", "question": "Did Germany's real GDP grow or shrink in 2023, and by how much?", "evidence": [[["deu_gdp_report.pdf", 1]]], "facts": ["0.3"]}
+{"id": "bra-gdp-2024", "type": "table", "question": "What is Brazil's nominal GDP for 2024?", "evidence": [[["bra_gdp_report.pdf", 1], ["global_gdp_comparison.pdf", 1], ["global_gdp_comparison.pdf", 2]]], "facts": ["2,330|2330"]}
+{"id": "jpn-capital", "type": "lookup", "question": "What is the capital of Japan?", "evidence": [[["jpn_gdp_report.pdf", 1]]], "facts": ["tokyo"]}
+{"id": "chn-currency", "type": "lookup", "question": "Which currency does China use?", "evidence": [[["chn_gdp_report.pdf", 1]]], "facts": ["renminbi|yuan|cny"]}
+{"id": "ind-population", "type": "lookup", "question": "What was India's population in 2024?", "evidence": [[["ind_gdp_report.pdf", 1]]], "facts": ["1441|1,441|1.44 billion"]}
+{"id": "usa-inflation", "type": "lookup", "question": "What was consumer price inflation in the United States in 2024?", "evidence": [[["usa_gdp_report.pdf", 1]]], "facts": ["3.0|3 percent|3%"]}
+{"id": "jpn-unemployment", "type": "lookup", "question": "What was Japan's unemployment rate in 2024?", "evidence": [[["jpn_gdp_report.pdf", 1]]], "facts": ["2.5"]}
+{"id": "chn-trade-balance", "type": "lookup", "question": "What was China's trade balance in 2024?", "evidence": [[["chn_gdp_report.pdf", 1]]], "facts": ["820", "surplus"]}
+{"id": "ind-exports", "type": "lookup", "question": "Name India's top exports.", "evidence": [[["ind_gdp_report.pdf", 1]]], "facts": ["pharmaceuticals", "software services", "gems"]}
+{"id": "deu-imports", "type": "lookup", "question": "What does Germany import the most?", "evidence": [[["deu_gdp_report.pdf", 1]]], "facts": ["crude petroleum", "natural gas"]}
+{"id": "gbr-services-share", "type": "lookup", "question": "What share of the UK's GDP comes from services?", "evidence": [[["gbr_gdp_report.pdf", 1]]], "facts": ["82"]}
+{"id": "bra-code", "type": "lookup", "question": "What is Brazil's country code in these reports?", "evidence": [[["bra_gdp_report.pdf", 1]]], "facts": ["bra"]}
+{"id": "chn-outlook", "type": "outlook", "question": "What is weighing on China's medium-term growth according to its outlook?", "evidence": [[["chn_gdp_report.pdf", 2]]], "facts": ["property", "demographic"]}
+{"id": "jpn-outlook", "type": "outlook", "question": "What constrains Japan's long-run growth?", "evidence": [[["jpn_gdp_report.pdf", 2]]], "facts": ["aging|ageing"]}
+{"id": "deu-outlook-risks", "type": "outlook", "question": "Which risks are mentioned in Germany's outlook?", "evidence": [[["deu_gdp_report.pdf", 2]]], "facts": ["ev transition|electric vehicle", "trade tensions"]}
+{"id": "most-populous", "type": "semantic", "question": "Which country recently became the most populous in the world?", "evidence": [[["ind_gdp_report.pdf", 1]]], "facts": ["india"]}
+{"id": "iron-ore-exporter", "type": "semantic", "question": "Which economy is a major exporter of agricultural commodities and iron ore?", "evidence": [[["bra_gdp_report.pdf", 1]]], "facts": ["brazil"]}
+{"id": "jpn-usd-decline", "type": "semantic", "question": "Why has Japan's GDP in US dollars declined in recent years?", "evidence": [[["jpn_gdp_report.pdf", 1], ["global_gdp_comparison.pdf", 2]]], "facts": ["yen|currency depreciation"]}
+{"id": "rank-3-2024", "type": "ranking", "question": "Which country ranked third by nominal GDP in 2024?", "evidence": [[["global_gdp_comparison.pdf", 2]]], "facts": ["germany"]}
+{"id": "fastest-growth-2024", "type": "ranking", "question": "Among the seven economies, which grew fastest in 2024?", "evidence": [[["global_gdp_comparison.pdf", 2], ["ind_gdp_report.pdf", 1]]], "facts": ["india", "7.8"]}
+{"id": "cmp-ind-usa-2023", "type": "comparison", "question": "Compare the 2023 real GDP growth of India and the United States.", "evidence": [[["ind_gdp_report.pdf", 1]], [["usa_gdp_report.pdf", 1]]], "facts": ["8.2", "2.5"]}
+{"id": "cmp-jpn-deu-2024", "type": "comparison", "question": "Was Germany's or Japan's nominal GDP larger in 2024?", "evidence": [[["global_gdp_comparison.pdf", 1], ["global_gdp_comparison.pdf", 2], ["deu_gdp_report.pdf", 1]], [["global_gdp_comparison.pdf", 1], ["global_gdp_comparison.pdf", 2], ["jpn_gdp_report.pdf", 1]]], "facts": ["germany", "4,590|4590"]}
+{"id": "na-australia", "type": "unanswerable", "question": "What was Australia's nominal GDP in 2023?", "answerable": false}
+{"id": "na-mars", "type": "unanswerable", "question": "What is the population of Mars?", "answerable": false}
+{"id": "na-2030-forecast", "type": "unanswerable", "question": "What will India's GDP be in 2030?", "answerable": false}
+{"id": "na-france-capital", "type": "unanswerable", "question": "What is the capital of France according to these reports?", "answerable": false}

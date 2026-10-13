@@ -1,0 +1,7 @@
+.env
+.rag_data/
+__pycache__/
+logs/
+*.egg-info/
+eval/results/
+test-results.xml
