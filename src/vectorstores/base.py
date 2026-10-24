@@ -10,6 +10,7 @@ import logging
 import re
 import uuid
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -91,6 +92,12 @@ class VectorStore(ABC):
         with log_step(logger, "store.delete", store=self._name, collection=self.collection, source=source) as out:
             out["removed"] = removed = self._delete_source(source)
         return removed
+
+    @contextmanager
+    def bulk(self) -> Iterator[None]:
+        """Wrap many add() calls (e.g. ingesting a folder). Stores whose indexes are cheaper to
+        build once than to maintain per insert (pgvector) override this; others do nothing."""
+        yield
 
     def list_sources(self) -> Dict[str, int]:
         """Documents in this collection: {source: chunk_count}."""

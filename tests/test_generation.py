@@ -201,3 +201,21 @@ def test_partial_answer_counts_as_found():
     assert not Answer("q", NOT_FOUND, []).found
     assert not Answer("q", NOT_FOUND.rstrip(".") + "  ", []).found
     assert Answer("q", f"India grew 8.2% [1]. The US figure is missing. {NOT_FOUND}", []).found
+
+
+@pytest.mark.parametrize("raw, normalized", [
+    ("India grew 8.2% [3], the US 2.5% [5, 8].", "India grew 8.2% [3], the US 2.5% [5][8]."),
+    ("See [1,2,3] and [4; 5].", "See [1][2][3] and [4][5]."),
+    ("Year [2023] stays, [7] stays.", "Year [2023] stays, [7] stays."),
+])
+def test_grouped_citations_are_normalized(raw, normalized):
+    from src.generation import normalize_citations
+
+    assert normalize_citations(raw) == normalized
+
+
+def test_answer_with_grouped_citations_gets_all_citations(rag):
+    rag._llm.reply = "India 8.2% [1], US 2.5% [2, 3]."
+    ans = rag.answer("compare", k=4)
+    assert ans.text == "India 8.2% [1], US 2.5% [2][3]."
+    assert [c["n"] for c in ans.citations] == [1, 2, 3]

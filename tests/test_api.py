@@ -277,3 +277,78 @@ def test_web_ui_is_served_with_spa_fallback_but_api_404s_stay_json(env, llm, tmp
         assert c.get("/health").json() == {"status": "ok"}
         # module scripts must be served as JavaScript, or the browser refuses to run them (PDF viewer worker)
         assert c.get("/assets/pdf.worker.min.mjs").headers["content-type"].startswith("text/javascript")
+
+
+def test_models_include_every_pulled_ollama_model(client, monkeypatch):
+    import src.llm.ollama_provider as op
+
+    monkeypatch.setattr(op, "list_local_models", lambda url=None: ["llama3.2:3b", "gemma4:e2b"])
+    models = {m["name"]: m for m in client.get("/v1/models").json()}
+    assert models["llama3.2:3b"]["available"] is True          # catalog model, pulled
+    assert models["qwen2.5:7b"]["available"] is False          # catalog model, not pulled
+    extra = models["ollama:gemma4:e2b"]                        # pulled, not in the catalog
+    assert extra == {"name": "ollama:gemma4:e2b", "provider": "ollama", "tier": "local",
+                     "input_per_m": 0.0, "output_per_m": 0.0, "available": True, "reason": None}
+
+
+def test_embedding_failure_maps_to_502_embedding_error(loaded, monkeypatch):
+    def revoked(*a, **k):
+        raise RuntimeError("Error code: 401 - Your API key has been invalidated.")
+
+    monkeypatch.setattr(HashEmbedder, "embed_query", revoked)
+    r = loaded.post("/v1/answer", json={"question": "GDP"})
+    body = r.json()
+    assert r.status_code == 502 and body["error"]["code"] == "embedding_error"
+    assert "Embedding with" in body["error"]["message"] and "API key" in body["error"]["message"]
+
+
+def test_status_reports_documents_embeddings_and_llm(loaded, monkeypatch):
+    s = loaded.get("/v1/status").json()
+    assert s["index"] == "default" and s["documents"] == 2 and s["chunks"] > 0
+    assert s["embedding_ok"] is True and s["embedding_error"] is None
+    assert s["embedding_provider"] == "sentence_transformers" and s["collection"].startswith("faiss:")
+    assert s["llm_model"]  # default model from settings
+
+    empty = loaded.get("/v1/status?index=archive").json()
+    assert empty["documents"] == 0 and empty["embedding_ok"] is True
+
+
+def test_status_shows_embedding_failure_and_caches_the_check(client, monkeypatch):
+    calls = []
+
+    def revoked(self, q):
+        calls.append(q)
+        raise RuntimeError("Error code: 401 - Your API key has been invalidated.")
+
+    monkeypatch.setattr(HashEmbedder, "embed_query", revoked)
+    s = client.get("/v1/status").json()
+    assert s["embedding_ok"] is False and "API key" in s["embedding_error"]
+    client.get("/v1/status")
+    assert len(calls) == 1  # second call served from the 60 s cache (no extra paid API call)
+
+
+def test_revoked_provider_key_makes_its_models_unavailable(client, monkeypatch):
+    import src.llm.keycheck as kc
+
+    kc.clear_cache()
+    monkeypatch.setattr(kc, "_check", lambda p: "OPENAI_API_KEY is invalid or revoked" if p == "openai" else None)
+    try:
+        models = {m["name"]: m for m in client.get("/v1/models").json()}
+        assert models["gpt-4o-mini"]["available"] is False
+        assert models["gpt-4o-mini"]["reason"] == "OPENAI_API_KEY is invalid or revoked"
+        assert models["claude-haiku-5-5"]["available"] is True
+    finally:
+        kc.clear_cache()
+
+
+def test_key_check_is_cached(monkeypatch):
+    import src.llm.keycheck as kc
+
+    kc.clear_cache()
+    calls = []
+    monkeypatch.setattr(kc, "_check", lambda p: calls.append(p) or None)
+    try:
+        kc.key_problem("openai"), kc.key_problem("openai")
+        assert calls == ["openai"]  # second call served from the 5-minute cache
+    finally:
+        kc.clear_cache()

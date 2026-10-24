@@ -256,3 +256,56 @@ def test_document_chunker_never_drops_consecutive_headings_or_number_lines():
     for line in text.split("\n"):
         assert line in joined, line
     assert chunks[0].startswith("CHAPTER 1\nGLOBAL OUTLOOK")  # both headings kept as context
+
+
+def test_token_chunker_uses_exact_counts_when_tiktoken_is_installed():
+    tiktoken = pytest.importorskip("tiktoken")
+    from src.chunking.token_aware import TokenAwareChunker
+
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        pytest.skip("tiktoken vocabulary not downloadable (offline)")
+    chunker = TokenAwareChunker(chunk_size=200, overlap=20)
+    assert chunker.using_fallback_counter is False
+    text = load_pdf(os.path.join(PDF_DIR, "usa_gdp_report.pdf"))[0].text
+    assert max(len(enc.encode(c)) for c in chunker.split(text)) <= 200
+
+
+def test_faiss_delete_and_replace_use_tombstones_and_survive_reload(tmp_path):
+    """Deletes/updates must not rewrite the vector file; state must survive a reload; compaction kicks in."""
+    from src.vectorstores import faiss_store
+    from src.vectorstores.faiss_store import FaissStore
+
+    emb = HashEmbedder()
+    chunks = get_chunker("recursive", 200, 20).chunk_documents(
+        load_pdf(os.path.join(PDF_DIR, "usa_gdp_report.pdf")) + load_pdf(os.path.join(PDF_DIR, "ind_gdp_report.pdf")))
+    vecs = emb.embed_documents([c.text for c in chunks])
+    store = FaissStore("tomb", emb.dimension, data_dir=str(tmp_path))
+    store.add(chunks, vecs)
+    vec_file = tmp_path / "faiss" / "tomb.f32"
+    size_before = vec_file.stat().st_size
+    n_usa = sum(c.metadata["source"] == "usa_gdp_report.pdf" for c in chunks)
+
+    faiss_store.COMPACT_RATIO = 0.99  # keep tombstones for this part of the test
+    try:
+        assert store.delete_source("usa_gdp_report.pdf") == n_usa
+        assert vec_file.stat().st_size == size_before  # not rewritten: just tombstoned
+        assert store.count() == len(chunks) - n_usa
+        assert "usa_gdp_report.pdf" not in store.list_sources()
+        assert all(h.metadata["source"] == "ind_gdp_report.pdf" for h in store.search(vecs[0], k=50))
+
+        changed = Chunk("replaced text", dict(chunks[-1].metadata))  # upsert an existing chunk_id
+        store.add([changed], [vecs[-1]])
+        assert store.count() == len(chunks) - n_usa
+        assert store.search(vecs[-1], k=1)[0].text == "replaced text"
+
+        reopened = FaissStore("tomb", emb.dimension, data_dir=str(tmp_path))  # tombstones persisted
+        assert reopened.count() == store.count()
+        assert reopened.search(vecs[-1], k=1)[0].text == "replaced text"
+        assert "usa_gdp_report.pdf" not in reopened.list_sources()
+    finally:
+        faiss_store.COMPACT_RATIO = 0.25
+    store.delete_source("ind_gdp_report.pdf")  # everything dead (> 25%) -> compaction rewrites the files
+    assert store.count() == 0 and vec_file.stat().st_size == 0
+    assert not (tmp_path / "faiss" / "tomb.deleted.json").exists()

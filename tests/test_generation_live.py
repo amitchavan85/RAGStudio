@@ -4,7 +4,7 @@ Uses the cheapest model of each provider; one short question costs well under a 
 import os
 
 import pytest
-from helpers import PDF_DIR, HashEmbedder
+from helpers import PDF_DIR, HashEmbedder, provider_problem
 
 from src.config import Settings
 from src.llm.ollama_provider import list_local_models
@@ -12,10 +12,12 @@ from src.pipeline import RAGPipeline
 
 S = Settings()
 OLLAMA_MODELS = list_local_models(S.ollama_url)
+OPENAI_PROBLEM = provider_problem("openai")
+ANTHROPIC_PROBLEM = provider_problem("anthropic")
 
 PROVIDERS = [
-    pytest.param("gpt-4o-mini", marks=pytest.mark.skipif(not S.openai_api_key.get_secret_value(), reason="OPENAI_API_KEY not set")),
-    pytest.param("claude-haiku-5-5", marks=pytest.mark.skipif(not S.anthropic_api_key.get_secret_value() and not os.environ.get("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set")),
+    pytest.param("gpt-4o-mini", marks=pytest.mark.skipif(OPENAI_PROBLEM is not None, reason=f"live OpenAI test: {OPENAI_PROBLEM}")),
+    pytest.param("claude-haiku-5-5", marks=pytest.mark.skipif(ANTHROPIC_PROBLEM is not None, reason=f"live Anthropic test: {ANTHROPIC_PROBLEM}")),
     pytest.param(f"ollama:{OLLAMA_MODELS[0]}" if OLLAMA_MODELS else "ollama:none",
                  marks=pytest.mark.skipif(not OLLAMA_MODELS, reason="no Ollama model pulled (try: ollama pull llama3.2:3b)")),
 ]

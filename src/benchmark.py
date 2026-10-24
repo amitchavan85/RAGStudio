@@ -57,8 +57,9 @@ def run_store(name, chunks, vecs, queries, dim, batch):
     store.reset()
     try:
         t = time.perf_counter()
-        for i in range(0, len(chunks), batch):
-            store.add(chunks[i : i + batch], vecs[i : i + batch].tolist())
+        with store.bulk():  # like real ingestion: pgvector builds its index once after the first load
+            for i in range(0, len(chunks), batch):
+                store.add(chunks[i : i + batch], vecs[i : i + batch].tolist())
         ingest_s = time.perf_counter() - t
         assert store.count() == len(chunks), f"{name}: count {store.count()} != {len(chunks)}"
 
@@ -101,8 +102,11 @@ def main() -> None:
     ap.add_argument("--stores", nargs="+", default=["chroma", "faiss", "qdrant", "pgvector"])
     args = ap.parse_args()
 
-    setup_logging(level="WARNING")  # console stays quiet; warnings/errors still go to LOG_DIR/rag.log
+    # Throwaway data folder for local stores. Must be set before anything reads the settings
+    # (they are cached on first use), or FAISS/Chroma would write into the project's DATA_DIR.
     os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="rag_bench_"))
+    get_settings.cache_clear()
+    setup_logging(level="WARNING")  # console stays quiet; warnings/errors still go to LOG_DIR/rag.log
 
     chunks, vecs, queries, n_real, embed_rate, dim = build_corpus(args.n)
     print(f"corpus: {args.n} chunks grown from {n_real} real chunks | dim={dim} | "

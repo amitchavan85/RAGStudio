@@ -52,6 +52,15 @@ def build_prompt(question: str, sources: List[SearchResult]) -> str:
     return "Sources:\n\n" + "\n\n".join(blocks) + f"\n\nQuestion: {question.strip()}"
 
 
+_GROUPED_CITATION = re.compile(r"\[(\d+(?:\s*[,;]\s*\d+)+)\]")
+
+
+def normalize_citations(text: str) -> str:
+    """Grouped citations "[5, 8]" or "[5;8]" (common with small/local models) -> "[5][8]",
+    so every consumer (API renumbering, UI chips, CLI) only has to understand [n]."""
+    return _GROUPED_CITATION.sub(lambda m: "".join(f"[{n}]" for n in re.findall(r"\d+", m.group(1))), text)
+
+
 def extract_citations(text: str, sources: List[SearchResult]) -> List[dict]:
     """[n] markers in the answer -> the sources they point to (unknown numbers are ignored)."""
     seen: List[int] = []

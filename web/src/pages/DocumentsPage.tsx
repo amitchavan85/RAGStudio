@@ -38,6 +38,7 @@ export function DocumentsPage() {
     if (finished) {
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       queryClient.invalidateQueries({ queryKey: ["indexes"] });
+      queryClient.invalidateQueries({ queryKey: ["status"] });
     }
   }, [finished, queryClient]);
 
@@ -47,6 +48,7 @@ export function DocumentsPage() {
       setToDelete(null);
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       queryClient.invalidateQueries({ queryKey: ["indexes"] });
+      queryClient.invalidateQueries({ queryKey: ["status"] });
     },
   });
 

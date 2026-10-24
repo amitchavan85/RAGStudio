@@ -151,6 +151,23 @@ class DeleteResult(BaseModel):
     collection: str
 
 
+class StatusOut(BaseModel):
+    """Health of one index as the web UI shows it in the header."""
+    index: str
+    vector_store: Optional[str] = None
+    embedding_provider: Optional[str] = None
+    embedding_model: Optional[str] = None
+    collection: Optional[str] = None
+    documents: Optional[int] = None
+    chunks: Optional[int] = None
+    store_error: Optional[str] = None
+    embedding_ok: bool = False
+    embedding_error: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_available: Optional[bool] = None  # None = not in the catalog, can't tell
+    llm_reason: Optional[str] = None
+
+
 class IndexOut(BaseModel):
     name: str
     vector_store: str

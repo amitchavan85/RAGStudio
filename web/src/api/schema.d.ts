@@ -55,6 +55,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Status
+         * @description Everything the UI needs to show whether asking will work: documents, embeddings, LLM.
+         */
+        get: operations["status_v1_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/models": {
         parameters: {
             query?: never;
@@ -457,6 +477,41 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /**
+         * StatusOut
+         * @description Health of one index as the web UI shows it in the header.
+         */
+        StatusOut: {
+            /** Index */
+            index: string;
+            /** Vector Store */
+            vector_store?: string | null;
+            /** Embedding Provider */
+            embedding_provider?: string | null;
+            /** Embedding Model */
+            embedding_model?: string | null;
+            /** Collection */
+            collection?: string | null;
+            /** Documents */
+            documents?: number | null;
+            /** Chunks */
+            chunks?: number | null;
+            /** Store Error */
+            store_error?: string | null;
+            /**
+             * Embedding Ok
+             * @default false
+             */
+            embedding_ok: boolean;
+            /** Embedding Error */
+            embedding_error?: string | null;
+            /** Llm Model */
+            llm_model?: string | null;
+            /** Llm Available */
+            llm_available?: boolean | null;
+            /** Llm Reason */
+            llm_reason?: string | null;
+        };
         /** Usage */
         Usage: {
             /** Provider */
@@ -546,6 +601,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IndexOut"][];
+                };
+            };
+        };
+    };
+    status_v1_status_get: {
+        parameters: {
+            query?: {
+                index?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import List, Optional
@@ -67,6 +68,15 @@ def create_app(embedder=None, llm=None) -> FastAPI:
             logger.warning("API_KEYS is not set: the API is open to anyone who can reach it (development only)")
         logger.info("API ready: indexes=%s custom_index=%s clients=%s", sorted(named_indexes()),
                     get_settings().allow_custom_index, sorted(keys))
+
+        def warm_up():  # load embedding models + stores now, so the first user request isn't slow
+            for name in named_indexes():
+                try:
+                    pipeline(name).store.count()
+                except Exception as e:
+                    logger.warning("warm-up of index %r failed: %s: %s", name, type(e).__name__, e)
+
+        threading.Thread(target=warm_up, name="warm-up", daemon=True).start()
         yield
         jobs.shutdown()
 
@@ -142,6 +152,13 @@ def create_app(embedder=None, llm=None) -> FastAPI:
         return error(503, "store_unavailable", f"{type(exc).__name__}: {exc}")
 
     app.add_exception_handler(ProviderError, _provider_error)
+
+    from src.embeddings import EmbeddingError
+
+    @app.exception_handler(EmbeddingError)
+    async def _embedding_error(request, exc: EmbeddingError):
+        logger.warning("embedding failed: %s", exc)
+        return error(502, "embedding_error", str(exc))
     for module, attr, handler in (
         ("openai", "APIError", _provider_error),
         ("anthropic", "APIError", _provider_error),
@@ -240,23 +257,66 @@ def create_app(embedder=None, llm=None) -> FastAPI:
             out.append(item)
         return out
 
+    embed_checks: dict = {}  # (index, collection) -> (checked at, error or None); avoids an API call per page load
+
+    @v1.get("/status", response_model=S.StatusOut, tags=["discovery"])
+    def status(index: str = "default"):
+        """Everything the UI needs to show whether asking will work: documents, embeddings, LLM."""
+        out = S.StatusOut(index=index, llm_model=get_settings().llm_model)
+        try:
+            rag = pipeline(index)
+            out.vector_store, out.embedding_provider = rag.config.vector_store, rag.config.embedding_provider
+            out.embedding_model, out.collection = rag.embedder.model_name, where(rag)
+        except ApiError:
+            raise
+        except Exception as e:  # e.g. embedding provider can't even start (missing key)
+            out.embedding_error = str(e)
+            return out
+        try:
+            docs = rag.list_documents()
+            out.documents, out.chunks = len(docs), sum(docs.values())
+        except Exception as e:
+            out.store_error = f"{type(e).__name__}: {e}"
+        key = (index, out.collection)
+        checked = embed_checks.get(key)
+        if checked is None or time.monotonic() - checked[0] > 60:
+            try:
+                with rag._embedding_errors():
+                    rag.embedder.embed_query("health check")
+                checked = (time.monotonic(), None)
+            except Exception as e:
+                checked = (time.monotonic(), str(e))
+            embed_checks[key] = checked
+        out.embedding_error = checked[1]
+        out.embedding_ok = checked[1] is None
+        default = next((m for m in list_models() if m.name in (out.llm_model, f"ollama:{out.llm_model}")), None)
+        if default:
+            out.llm_available, out.llm_reason = default.available, default.reason
+        return out
+
     @v1.get("/models", response_model=List[S.ModelOut], tags=["discovery"])
     def list_models():
         from src.llm import MODELS
         from src.llm.ollama_provider import list_local_models
 
+        from src.llm.keycheck import key_problem
+
         s = get_settings()
-        keys = {"openai": bool(s.openai_api_key.get_secret_value()),
-                "anthropic": bool(s.anthropic_api_key.get_secret_value() or os.environ.get("ANTHROPIC_API_KEY"))}
+        # Does each provider's key actually work? (free "list models" call, cached 5 minutes)
+        problems = {p: key_problem(p) for p in ("openai", "anthropic")}
         pulled = set(list_local_models(s.ollama_url))
         out = []
         for name, m in MODELS.items():
             if m.provider == "ollama":
                 ok, why = name in pulled, None if name in pulled else f"not pulled (ollama pull {name})"
             else:
-                ok, why = keys[m.provider], None if keys[m.provider] else f"{m.provider.upper()}_API_KEY not set"
+                ok, why = problems[m.provider] is None, problems[m.provider]
             out.append(S.ModelOut(name=name, provider=m.provider, tier=m.tier, input_per_m=m.input_per_m,
                                   output_per_m=m.output_per_m, available=ok, reason=why))
+        # Any other model pulled into Ollama is usable too (free, local), as "ollama:<tag>".
+        for tag in sorted(pulled - set(MODELS)):
+            out.append(S.ModelOut(name=f"ollama:{tag}", provider="ollama", tier="local", input_per_m=0.0,
+                                  output_per_m=0.0, available=True, reason=None))
         return out
 
     @v1.get("/options", tags=["discovery"])

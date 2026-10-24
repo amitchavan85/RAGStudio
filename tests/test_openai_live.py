@@ -3,6 +3,7 @@
 Makes one tiny embeddings request (a few tokens, well under a cent).
 """
 import pytest
+from helpers import provider_problem
 
 from src.config import Settings
 from src.embeddings.openai_provider import OpenAIEmbeddings
@@ -10,6 +11,7 @@ from src.embeddings.openai_provider import OpenAIEmbeddings
 KEY = Settings().openai_api_key.get_secret_value()
 
 pytestmark = pytest.mark.skipif(not KEY, reason="OPENAI_API_KEY not set in .env or environment")
+_PROBLEM = provider_problem("openai") if KEY else None
 
 
 def test_openai_key_format():
@@ -17,6 +19,7 @@ def test_openai_key_format():
     assert KEY == KEY.strip()
 
 
+@pytest.mark.skipif(_PROBLEM is not None, reason=f"live OpenAI test: {_PROBLEM}")
 def test_openai_key_works_for_embeddings():
     emb = OpenAIEmbeddings(api_key=KEY)
     vecs = emb.embed_documents(["GDP growth"])

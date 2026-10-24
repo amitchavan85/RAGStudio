@@ -167,3 +167,31 @@ def test_filtered_search_and_iter_records(live, corpus):
     assert hits and all(h.metadata["page"] == 1 for h in hits)
     assert store.search(q, k=5, filters={"source": "nope.pdf"}) == []
     assert len(list(store.iter_records())) == len(chunks)
+
+
+def test_bulk_load_builds_index_once_and_keeps_search_exact(live, corpus):
+    """pgvector: bulk() on an empty table drops the HNSW index, then rebuilds it; other stores: no-op."""
+    import numpy as np
+
+    name, store, _ = live
+    chunks, vecs, emb = corpus
+    with store.bulk():
+        if name == "pgvector":
+            with store._conn.cursor() as cur:
+                cur.execute("SELECT count(*) FROM pg_indexes WHERE indexname = %s", (f"{store.collection}_hnsw",))
+                assert cur.fetchone()[0] == 0  # index dropped during the load
+        for i in range(0, len(chunks), 200):
+            store.add(chunks[i:i + 200], vecs[i:i + 200])
+    if name == "pgvector":
+        with store._conn.cursor() as cur:
+            cur.execute("SELECT count(*) FROM pg_indexes WHERE indexname = %s", (f"{store.collection}_hnsw",))
+            assert cur.fetchone()[0] == 1  # rebuilt once at the end
+    assert store.count() == len(chunks)
+    q = np.asarray(emb.embed_query("India GDP growth rate"))
+    m = np.asarray(vecs)
+    sims = (m @ q) / (np.linalg.norm(m, axis=1) * np.linalg.norm(q) + 1e-12)
+    hits = store.search(q.tolist(), k=5)
+    assert [h.score for h in hits] == pytest.approx(sorted(sims, reverse=True)[:5], abs=1e-4)
+    with store.bulk():  # non-empty table: index must stay in place
+        store.add(chunks[:3], vecs[:3])
+    assert store.count() == len(chunks)

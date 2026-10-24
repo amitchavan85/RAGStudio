@@ -1,11 +1,15 @@
 """pgvector: vectors in Postgres (needs the `vector` extension; see docker-compose.yml)."""
 from __future__ import annotations
 
+import logging
 import re
+from contextlib import contextmanager
 from typing import Dict, Iterator, List, Tuple
 
 from src.chunking.base import Chunk
 from src.vectorstores.base import SearchResult, VectorStore
+
+logger = logging.getLogger(__name__)
 
 
 class PgVectorStore(VectorStore):
@@ -38,13 +42,47 @@ class PgVectorStore(VectorStore):
                 f"chunk_id TEXT PRIMARY KEY, text TEXT NOT NULL, "
                 f"metadata JSONB NOT NULL, embedding vector({self.dimension}))"
             )
-            cur.execute(
-                f"CREATE INDEX IF NOT EXISTS {self.collection}_hnsw ON {self.collection} "
-                f"USING hnsw (embedding vector_cosine_ops)"
-            )
+            self._create_vector_index(cur)
             cur.execute(  # fast delete/list by document
                 f"CREATE INDEX IF NOT EXISTS {self.collection}_source ON {self.collection} ((metadata->>'source'))"
             )
+
+    def _create_vector_index(self, cur) -> None:
+        cur.execute(
+            f"CREATE INDEX IF NOT EXISTS {self.collection}_hnsw ON {self.collection} "
+            f"USING hnsw (embedding vector_cosine_ops)"
+        )
+
+    @contextmanager
+    def bulk(self) -> Iterator[None]:
+        """First load into an empty table: drop the HNSW index, insert everything, build it once.
+
+        pgvector's own advice: building the index after loading is much faster than updating it
+        on every insert. Only for empty tables, so searches on a live index are never affected.
+        """
+        if self.count() > 0:
+            yield
+            return
+        with self._conn.cursor() as cur:
+            cur.execute(f"DROP INDEX IF EXISTS {self.collection}_hnsw")
+        try:
+            yield
+        finally:
+            self._rebuild_vector_index()
+
+    def _rebuild_vector_index(self) -> None:
+        """Build the HNSW index after a bulk load; never leave the table without it."""
+        try:
+            with self._conn.cursor() as cur:
+                cur.execute("SET maintenance_work_mem = '512MB'")  # room to build the graph in memory (fast)
+                self._create_vector_index(cur)
+        except Exception as e:  # e.g. too little shared memory for a parallel build (Docker's 64 MB /dev/shm)
+            logger.warning("fast HNSW build failed (%s: %s); retrying with default settings", type(e).__name__, e)
+            with self._conn.cursor() as cur:
+                cur.execute("RESET maintenance_work_mem")
+                cur.execute("SET max_parallel_maintenance_workers = 0")  # no shared-memory workers
+                self._create_vector_index(cur)
+                cur.execute("RESET max_parallel_maintenance_workers")
 
     def _add(self, chunks: List[Chunk], vectors: List[List[float]]) -> None:
         self._check(chunks, vectors)

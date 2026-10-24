@@ -42,3 +42,13 @@ class FakeLLM(LLM):
     def generate(self, prompt, system=None, max_tokens=4096):
         self.calls.append({"prompt": prompt, "system": system})
         return LLMResponse(text=self.reply, model=self.model, provider=self.provider, input_tokens=100, output_tokens=10)
+
+
+def provider_problem(provider: str):
+    """Why a live test against `provider` can't run (key missing, invalid or revoked), or None.
+
+    Uses the API's own key check (free "list models" call, cached), so a revoked key skips
+    the paid live tests with a clear reason instead of failing them."""
+    from src.llm.keycheck import key_problem
+
+    return key_problem(provider)

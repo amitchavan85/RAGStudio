@@ -6,6 +6,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { setUnauthorizedHandler } from "./api/client";
 import { ApiKeyDialog } from "./components/ApiKeyDialog";
 import { SettingsDialog } from "./components/SettingsDialog";
+import { StatusPill } from "./components/StatusPill";
 import { cx, IconButton } from "./components/ui";
 import { AskPage } from "./pages/AskPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
@@ -41,10 +42,10 @@ export function App() {
   return (
     <Tooltip.Provider>
       <div className="flex h-dvh flex-col">
-        <header className="flex h-14 shrink-0 items-center gap-6 border-b border-border bg-surface px-4">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 sm:gap-6 sm:px-4">
           <div className="flex items-center gap-2 font-semibold tracking-tight">
             <span aria-hidden className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-sm text-on-accent">R</span>
-            RAG Studio
+            <span className="hidden sm:inline">RAG Studio</span>
           </div>
           <nav className="flex gap-1" aria-label="Main">
             {[["/", "Ask"], ["/documents", "Documents"]].map(([to, label]) => (
@@ -61,6 +62,7 @@ export function App() {
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-1">
+            <StatusPill />
             <IconButton label={`Theme: ${settings.theme} (click to change)`} onClick={() => update({ theme: nextTheme[settings.theme] })}>
               <ThemeIcon size={18} />
             </IconButton>

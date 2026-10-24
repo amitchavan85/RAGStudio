@@ -13,6 +13,7 @@ export type DocumentList = S["DocumentList"];
 export type IndexOut = S["IndexOut"];
 export type ModelOut = S["ModelOut"];
 export type RetrievalOptions = S["RetrievalOptions"];
+export type StatusOut = S["StatusOut"];
 
 export type Options = {
   indexes: string[];
@@ -112,6 +113,7 @@ export const api = {
   options: () => request<Options>("/v1/options"),
   models: () => request<ModelOut[]>("/v1/models"),
   indexes: () => request<IndexOut[]>("/v1/indexes"),
+  status: (index: string) => request<StatusOut>(`/v1/status?${qs(index)}`),
   documents: (index: string) => request<DocumentList>(`/v1/documents?${qs(index)}`),
   deleteDocument: (index: string, source: string) =>
     request<S["DeleteResult"]>(`/v1/documents/${encodeURIComponent(source)}?${qs(index)}`, { method: "DELETE" }),

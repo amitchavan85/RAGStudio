@@ -23,16 +23,17 @@ import logging
 import os
 import re
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field, fields, replace
 from functools import lru_cache
 from typing import Callable, Dict, Iterable, List, Optional
 
 from src.chunking import AVAILABLE_STRATEGIES, get_chunker
 from src.config import get_settings
-from src.embeddings import EmbeddingProvider, get_embedder
+from src.embeddings import EmbeddingError, EmbeddingProvider, get_embedder
 from src.ingestion.loader import load_pdf
 from src.logging_config import log_step
-from src.generation import NOT_FOUND, SYSTEM_PROMPT, Answer, build_prompt, extract_citations
+from src.generation import NOT_FOUND, SYSTEM_PROMPT, Answer, build_prompt, extract_citations, normalize_citations
 from src.retrieval import BM25Index, get_reranker, rrf_fuse
 from src.vectorstores import AVAILABLE_STORES, SearchResult, VectorStore, get_vector_store
 from src.vectorstores.base import Filters
@@ -230,6 +231,25 @@ class RAGPipeline:
         with _BM25_LOCK:
             _BM25_CACHE.pop(self._bm25_key(), None)
 
+    @contextmanager
+    def _embedding_errors(self):
+        """Report embedding failures as EmbeddingError with the cause and a fix, so they are not
+        mistaken for LLM failures (e.g. a revoked OpenAI key while answering with a local model)."""
+        try:
+            yield
+        except EmbeddingError:
+            raise
+        except Exception as e:
+            provider = self.config.embedding_provider
+            text = str(e)
+            if type(e).__name__ == "AuthenticationError" or "401" in text or "OPENAI_API_KEY" in text:
+                cause = "the API key is invalid, revoked or missing (OPENAI_API_KEY)"
+            else:
+                cause = f"{type(e).__name__}: {text[:200]}"
+            hint = (" Fix the key, or set EMBEDDING_PROVIDER=sentence_transformers for free local embeddings"
+                    " (then re-upload your documents: they go to a new collection).") if provider == "openai" else ""
+            raise EmbeddingError(f"Embedding with {provider} failed: {cause}.{hint}") from e
+
     def _chunker(self):
         llm_fn = self._llm_fn
         if self.config.chunking_strategy == "agentic" and llm_fn is None:
@@ -243,7 +263,8 @@ class RAGPipeline:
         report = IngestReport(collection=self.collection)
         chunker = self._chunker()
         with log_step(logger, "ingest", files=len(files), store=self.config.vector_store,
-                      collection=self.collection, strategy=self.config.chunking_strategy) as out:
+                      collection=self.collection, strategy=self.config.chunking_strategy) as out, \
+                self.store.bulk():  # pgvector: first load into an empty table builds its index once, at the end
             for path in files:
                 source = os.path.basename(path)
                 try:
@@ -255,8 +276,9 @@ class RAGPipeline:
                 if not docs:
                     report.skipped.append({"source": source, "reason": "no extractable text (scanned PDF needs OCR)"})
                     continue
-                chunks = chunker.chunk_documents(docs)
-                vectors = self.embedder.embed_documents([c.text for c in chunks])
+                with self._embedding_errors():  # semantic chunking embeds too
+                    chunks = chunker.chunk_documents(docs)
+                    vectors = self.embedder.embed_documents([c.text for c in chunks])
                 # Replace only after chunking/embedding succeeded, so a failure never loses the old version.
                 replaced = self.store.delete_source(source)
                 self.store.add(chunks, vectors)
@@ -296,7 +318,9 @@ class RAGPipeline:
                       filters=sorted(filters) if filters else None) as out:
             ranked: List[List[SearchResult]] = []
             if mode in ("vector", "hybrid"):
-                ranked.append(self.store.search(self.embedder.embed_query(question), k=pool, filters=filters))
+                with self._embedding_errors():
+                    vector = self.embedder.embed_query(question)
+                ranked.append(self.store.search(vector, k=pool, filters=filters))
             if mode in ("keyword", "hybrid"):
                 ranked.append(self._keyword_index().search(question, k=pool, filters=filters))
             results = rrf_fuse(ranked, k=pool) if mode == "hybrid" else ranked[0]
@@ -342,8 +366,8 @@ class RAGPipeline:
         with log_step(logger, "answer", sources=len(sources)) as out:
             resp = llm.generate(build_prompt(question, sources), system=SYSTEM_PROMPT, max_tokens=max_tokens)
             result = Answer(
-                question=question, text=resp.text.strip(), sources=sources,
-                citations=extract_citations(resp.text, sources), model=resp.model, provider=resp.provider,
+                question=question, text=normalize_citations(resp.text.strip()), sources=sources,
+                citations=extract_citations(normalize_citations(resp.text), sources), model=resp.model, provider=resp.provider,
                 input_tokens=resp.input_tokens, output_tokens=resp.output_tokens,
             )
             out.update(model=resp.model, citations=len(result.citations), found=result.found)

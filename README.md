@@ -52,7 +52,7 @@ RAG/
 │   ├── chunking/             # 8 strategies behind BaseChunker + get_chunker() factory
 │   ├── embeddings/           # EmbeddingProvider: sentence-transformers, OpenAI
 │   └── vectorstores/         # VectorStore: Chroma, FAISS, Qdrant, pgvector
-└── tests/                    # tests (235); data/pdfs = committed copy of the 8 GDP samples; helpers.py = fakes
+└── tests/                    # tests (242); data/pdfs = committed copy of the 8 GDP samples; helpers.py = fakes
 ```
 
 Logs are written to `./logs/rag.log` (git-ignored).
@@ -101,7 +101,7 @@ Copy `.env.example` to `.env`. Main settings: `API_KEYS`, `RATE_LIMIT_PER_MINUTE
 pip install -r requirements.txt
 pip install -e .                       # makes `src` importable from anywhere (debugger, IDE)
 cp .env.example .env
-python -m pytest                       # 235 tests
+python -m pytest                       # 242 tests
 ```
 
 ```python
@@ -191,7 +191,7 @@ cd web && npm install && npm run build && cd ..   # once (needs Node.js 20+)
 python -m src.api                                  # open http://127.0.0.1:8000
 ```
 
-Ask questions with clickable citations that open the PDF at the cited page with the passage highlighted, upload and manage documents, pick the model by cost tier, and switch theme/accent. Development mode, code map and design guide: [UI.md](UI.md).
+Ask questions (or **Search** for passages without any AI call: free and instant) with clickable citations that open the PDF at the cited page with the passage highlighted, upload and manage documents, pick the model by cost tier, and switch theme/accent. Development mode, code map and design guide: [UI.md](UI.md).
 
 ## HTTP API (P4)
 
@@ -208,6 +208,7 @@ docker compose --profile api up -d --build api       # or in Docker, next to Qdr
 | `POST /v1/search` | Ranked chunks with per-stage scores |
 | `POST /v1/answer` | Grounded answer, citations (renumbered 1..n, with snippets), token usage |
 | `GET /v1/indexes`, `/v1/models`, `/v1/options` | What a client can choose: indexes with document counts, models with availability and price, chunkers, modes, defaults, limits |
+| `GET /v1/status?index=` | Health of one index for the UI: documents, embedding check, default model usable (keys validated) |
 | `GET /v1/documents/{source}/file?index=` | The original PDF (kept for uploads through the API), used by the UI to open citations |
 | `GET /health`, `GET /ready` | Liveness; readiness (every index's store reachable) |
 
@@ -306,6 +307,12 @@ Two equivalent pipelines: install dependencies (CPU-only PyTorch), start Qdrant 
 - Paid live LLM tests run only if you add `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` as secret pipeline variables (GitHub: repository secrets); otherwise they skip. A local run that mimics CI (no keys, services up): 226 passed, 9 skipped.
 - Tests use a committed copy of the GDP samples in `tests/data/pdfs`, so they never depend on your data folder.
 
+## Troubleshooting
+
+- **"Embedding with openai failed: the API key is invalid…" while using a local (Ollama) model.** Answering has two AI steps: *embedding* (turning documents and the question into vectors, `EMBEDDING_PROVIDER`) and *answering* (`LLM_MODEL` / the model picker). A local answer model does not change the embedding step. For a fully local, free setup set `EMBEDDING_PROVIDER=sentence_transformers`, recreate the API (`docker compose --profile api up -d --force-recreate api`) and re-upload your PDFs (local embeddings use a new collection). Otherwise put a valid key in `OPENAI_API_KEY`. The API reports this as `502 embedding_error`, separate from LLM failures (`provider_error`).
+- **Check health at a glance:** the status pill in RAG Studio's header (or `GET /v1/status?index=…`) shows the index's documents, whether embeddings work (live check, cached 60 s) and whether the default answer model is usable. Provider keys are validated with the providers' free "list models" calls (cached 5 min), so a revoked key shows as unavailable instead of failing on the first question.
+- **Keyword search keeps working without embeddings** (Search mode, keyword): useful to check documents are indexed when the embedding provider is down.
+
 ## Logging
 
 Plain-text logs go to the console and to a rotating file (`LOG_DIR/rag.log`, 5 MB x 3). A relative `LOG_DIR` (default `./logs`) is resolved from the project root, and `.env` is also read from the project root, so the same settings and log folder apply wherever you run from. Logging is only active after `setup_logging()` is called: `python -m src.cli` and `python -m src.benchmark` do this; in your own scripts, call it once at startup. Test runs write their logs to `logs/pytest.log` (set in `pytest.ini`). Call `setup_logging()` once at startup and `new_request_id()` once per ingest or query request; every line then carries `[req=<id>]`.
@@ -354,16 +361,17 @@ Measured on this machine (1536-dim OpenAI embeddings, batches of 1000), **before
 | Qdrant | 18.9 s | 221.2 s | 81 ms | 1.0 | 0.7 s |
 | pgvector | 41.8 s | 472.1 s | 61 ms | **0.812** | 0.6 s |
 
-After the fixes (50k chunks, re-measured):
+After the fixes (50k chunks, re-measured 2026-10-15):
 
 | Store | Ingest 50k | Query p50 | Recall@10 | Update 100 |
 |---|---|---|---|---|
-| FAISS | **16.5 s** (was 114.8) | 39 ms | 1.0 | 4.6 s (was 3.7, not fixed) |
-| pgvector | 329.8 s (was 472.1) | 61 ms | **0.99** (was 0.812) | 0.4 s |
+| FAISS | **6.9 s** (was 114.8) | 23 ms | 1.0 | **15 ms** (was 3.7 s) |
+| pgvector | **110.5 s** (was 472.1) | 56 ms | 0.97 (was 0.812) | 0.4 s |
 
 Findings and fixes:
-- **FAISS ingest grew with the square of the size** (5× data, 40× time): every add rewrote the whole index (~300 MB at 50k) and JSON file. Storage is now append-only: 7× faster, close to linear. **Still open:** updating existing chunks (re-ingesting an edited document) rewrites the whole vector file, about 4.6 s at 50k.
-- **pgvector silently lost recall** (0.81 at 50k) with the default HNSW search width. Now `ef_search=100` (recall 0.99) and inserts are sent in pages of 1000 (1.4× faster). **Still open:** pgvector is the slowest to ingest because it updates the HNSW index on every insert.
+- **FAISS ingest grew with the square of the size** (5x data, 40x time): every add rewrote the whole index (~300 MB at 50k). Storage is now append-only, and deletes/updates (re-ingesting a document) only mark old rows as deleted ("tombstones", `.deleted.json`); searches skip them and the files are compacted once more than 25% of rows are dead. Updating 100 chunks at 50k: 3.7-4.6 s -> 15 ms.
+- **pgvector silently lost recall** (0.81 at 50k) with the default HNSW search width; now `ef_search=100` (0.97-0.99). **Bulk load:** ingesting into an empty table drops the HNSW index, inserts everything and builds the index once (pgvector's own advice): 330 s -> 110 s at 50k. Needs enough shared memory for the parallel index build (`shm_size: 1gb` on the Postgres container); if the fast build still fails it retries with default settings, so the table is never left without its index.
+- **Benchmark bug fixed:** since the logging change the benchmark read the cached settings before switching `DATA_DIR` to a temp folder, so FAISS/Chroma wrote into the project's `.rag_data` on the (slower) data drive; numbers in between were inflated (FAISS ingest ~40 s instead of ~7 s).
 - Chroma and Qdrant behaved as expected for HNSW indexes (ingest slows somewhat with size, recall stays ≥ 0.99). Qdrant ingest over REST is the next-slowest; gRPC would likely help.
 
 ## Testing
@@ -371,7 +379,7 @@ Findings and fixes:
 Run from the repo root (after `pip install -e .`):
 
 ```bash
-python -m pytest                          # all tests; last line shows e.g. "235 passed"
+python -m pytest                          # all tests; last line shows e.g. "242 passed"
 python -m pytest -v                       # one line per test (PASSED/FAILED)
 python -m pytest tests/test_logging.py    # one file
 python -m pytest -k "chroma"              # tests whose name matches
@@ -413,9 +421,9 @@ These parts are written but have never been run. Verify each before relying on i
 - [x] **Qdrant against a real server**: verified against the docker-compose container by `tests/test_live_servers.py`.
 - [x] **OpenAI embedder** (`src/embeddings/openai_provider.py`): verified with a live call (`tests/test_openai_live.py`, skipped when no key is set). Batching and retry behaviour under load are still unchecked.
 - [x] **Agentic chunker with a real LLM**: verified with `gpt-4o-mini` (`tests/test_agentic_live.py`). On the 16 sample pages the first prompt let the model paraphrase and drop table rows (caught by the number check and sent to the recursive fallback); after requiring verbatim copy, 16/16 pages were faithful, 48 chunks averaging 328 characters. Cost was about $0.004 and 3.5 s per page. Not yet checked: long pages, other models, retry behaviour under rate limits.
-- [ ] **Token chunker with `tiktoken`**: tests use the word-count fallback. Install `tiktoken` and confirm exact token counts.
+- [x] **Token chunker with `tiktoken`**: installed (`requirements.txt`); exact counts. The word-based fallback undercounted a table-heavy page by 30% (367 vs 528 tokens); a test checks chunks stay within the limit.
 - [x] **Semantic chunker with the real embedding model**: verified with `all-MiniLM-L6-v2` (`tests/test_semantic_real.py`). Found and fixed two problems: it split on sentences only, so line-based PDF text produced about 2 cuts per page (the 500-char fallback did the rest) and table newlines were flattened; it now splits on lines and sentences, keeps the original whitespace and merges tiny chunks. Result at the default `breakpoint_percentile=85`: 59 chunks, avg 269 chars, none under 100, no numbers lost. Still to tune: the percentile on a larger, more varied corpus. Note PDF hard line-wraps can still put a cut mid-sentence.
-- [ ] **Large-scale behaviour (mostly done)**: benchmarked to 50k chunks (see Scale benchmark). FAISS ingest and pgvector recall are fixed, re-measured, and the full test suite passes with the new FAISS storage. Open: FAISS updates rewrite the whole vector file (4.6 s at 50k); pgvector bulk ingest is slow (151 chunks/s); RAM use not measured.
+- [x] **Large-scale behaviour**: benchmarked to 50k chunks; FAISS ingest/updates and pgvector recall/bulk load fixed and re-measured (see Scale benchmark). RAM use is not measured.
 - [x] **Tests depend on the data folder**: tests now use a committed copy in `tests/data/pdfs`.
 
 - [x] **Multi-column PDFs**: fixed by column-aware extraction (P6); retrieval on `content.pdf` went from hit@1 0.4 to 0.7.
@@ -457,4 +465,5 @@ Steps 1–3 give a working question-and-answer pipeline; step 4 makes it the sel
 ### P6. Production hardening (mostly done)
 - [x] Ingestion quality: column-aware extraction, running header/footer removal, drop capitals, OCR for scanned pages (RapidOCR). Other file formats: not needed yet.
 - [x] API auth (keys) and rate limits; CI that runs the test suite (Azure Pipelines + GitHub Actions).
-- [ ] Open items: FAISS update speed, pgvector bulk load, `tiktoken`, the deferred cost features (P3), Anthropic/Ollama live checks. (Test data moved to `tests/data/`: done.)
+- [x] FAISS update speed (tombstones), pgvector bulk load, `tiktoken`, test data in `tests/data/`.
+- [ ] Still open: the deferred cost features (P3), Anthropic/Ollama live checks.

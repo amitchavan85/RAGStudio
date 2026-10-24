@@ -1,11 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowUp, BookOpen, Check, Copy, FileSearch, FileText, RotateCcw, SearchX, X } from "lucide-react";
+import { ArrowUp, BookOpen, Check, Copy, FileSearch, FileText, PanelLeft, RotateCcw, Search, SearchX, UploadCloud, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, type AnswerResponse, type Citation, type ChunkOut } from "../api/client";
 import { ModelPicker, useChosenModel } from "../components/ModelPicker";
 import { PdfViewer } from "../components/PdfViewer";
-import { Badge, Button, cx, IconButton, Notice, Tip } from "../components/ui";
+import { Badge, Button, cx, IconButton, Notice, Segmented, Tip } from "../components/ui";
 import { answerToMarkdown, formatMs, friendlyError, splitCitations } from "../lib/logic";
 import { useSettings } from "../settings";
 
@@ -13,8 +13,10 @@ type Turn = {
   id: string;
   question: string;
   index: string;
+  kind: "answer" | "search"; // search = passages only, no LLM
   status: "pending" | "done" | "error";
   answer?: AnswerResponse;
+  results?: ChunkOut[];
   error?: unknown;
   ms?: number;
 };
@@ -25,7 +27,9 @@ const HISTORY = "rag.history";
 
 function loadHistory(): Turn[] {
   try {
-    return (JSON.parse(sessionStorage.getItem(HISTORY) ?? "[]") as Turn[]).filter((t) => t.status === "done");
+    return (JSON.parse(sessionStorage.getItem(HISTORY) ?? "[]") as Turn[])
+      .filter((t) => t.status === "done")
+      .map((t) => ({ ...t, kind: t.kind ?? "answer" }));
   } catch {
     return [];
   }
@@ -47,49 +51,66 @@ export function AskPage() {
   }, [turns]);
 
   const { model } = useChosenModel();
+  const retrieval = () => ({
+    mode: settings.mode ?? undefined,
+    k: settings.k ?? undefined,
+    reranker: settings.reranker ?? undefined,
+    filters: settings.sources.length ? { source: settings.sources } : undefined,
+  });
+  const search = useMutation({
+    mutationFn: (question: string) => api.search({ question, index: settings.index, retrieval: retrieval() }),
+  });
   const ask = useMutation({
     mutationFn: (question: string) =>
       api.answer({
         question,
         index: settings.index,
-        retrieval: {
-          mode: settings.mode ?? undefined,
-          k: settings.k ?? undefined,
-          reranker: settings.reranker ?? undefined,
-          filters: settings.sources.length ? { source: settings.sources } : undefined,
-        },
+        retrieval: retrieval(),
         llm: { model: model?.name, max_tokens: 2048 },
         include_sources: true,
       }),
   });
 
-  const submit = async (question: string) => {
+  const submit = async (question: string, kind: Turn["kind"] = settings.askMode) => {
     const id = crypto.randomUUID();
     const started = performance.now();
-    setTurns((t) => [...t, { id, question, index: settings.index, status: "pending" }]);
+    setTurns((t) => [...t, { id, question, index: settings.index, kind, status: "pending" }]);
     try {
-      const answer = await ask.mutateAsync(question);
+      const done =
+        kind === "search"
+          ? { results: (await search.mutateAsync(question)).results }
+          : { answer: await ask.mutateAsync(question) };
       const ms = performance.now() - started;
-      setTurns((t) => t.map((x) => (x.id === id ? { ...x, status: "done", answer, ms } : x)));
+      setTurns((t) => t.map((x) => (x.id === id ? { ...x, ...done, status: "done", ms } : x)));
     } catch (error) {
       setTurns((t) => t.map((x) => (x.id === id ? { ...x, status: "error", error } : x)));
     }
   };
 
+  const [drawer, setDrawer] = useState(false);
+  const docs = useQuery({ queryKey: ["documents", settings.index], queryFn: () => api.documents(settings.index) });
+  const docCount = docs.data?.documents.length;
+
   return (
     <div className="flex h-full">
-      <Sidebar />
+      <Sidebar mobileOpen={drawer} onClose={() => setDrawer(false)} />
       <section className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-2 border-b border-border bg-surface px-4 py-2 md:hidden">
+          <Button size="sm" variant="ghost" onClick={() => setDrawer(true)} aria-label="Index and documents">
+            <PanelLeft size={16} /> {settings.index}
+            {settings.sources.length > 0 ? ` · ${settings.sources.length} selected` : docCount != null ? ` · ${docCount} docs` : ""}
+          </Button>
+        </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl space-y-8 px-6 py-8">
-            {turns.length === 0 && <EmptyState onPick={submit} />}
+          <div className="mx-auto max-w-3xl space-y-8 px-4 py-8 sm:px-6">
+            {turns.length === 0 && <EmptyState onPick={submit} docCount={docCount} index={settings.index} />}
             {turns.map((t) => (
               <TurnView
                 key={t.id}
                 turn={t}
                 onRetry={() => {
                   setTurns((all) => all.filter((x) => x.id !== t.id));
-                  submit(t.question);
+                  submit(t.question, t.kind);
                 }}
                 onOpen={(o) => setOpened({ ...o, index: t.index })}
               />
@@ -97,14 +118,42 @@ export function AskPage() {
             <div ref={endRef} />
           </div>
         </div>
-        <QuestionBox onSubmit={submit} busy={ask.isPending} onClear={turns.length ? () => setTurns([]) : undefined} />
+        <QuestionBox onSubmit={submit} busy={ask.isPending || search.isPending} onClear={turns.length ? () => setTurns([]) : undefined} />
       </section>
       {opened && <SourcePanel opened={opened} onClose={() => setOpened(null)} />}
     </div>
   );
 }
 
-function Sidebar() {
+function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mobileOpen, onClose]);
+  return (
+    <>
+      <aside className="hidden w-64 shrink-0 flex-col gap-6 overflow-y-auto border-r border-border bg-surface p-4 md:flex">
+        <SidebarContent />
+      </aside>
+      {mobileOpen && (
+        <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label="Index and documents">
+          <div className="absolute inset-0 bg-black/40 animate-fade-in" onClick={onClose} />
+          <aside className="absolute inset-y-0 left-0 flex w-[min(85vw,320px)] flex-col gap-6 overflow-y-auto border-r border-border bg-surface p-4 shadow-2xl animate-slide-in">
+            <div className="flex items-center justify-between">
+              <span className="font-medium">Index & documents</span>
+              <IconButton label="Close" onClick={onClose}><X size={18} /></IconButton>
+            </div>
+            <SidebarContent />
+          </aside>
+        </div>
+      )}
+    </>
+  );
+}
+
+function SidebarContent() {
   const { settings, update } = useSettings();
   const indexes = useQuery({ queryKey: ["indexes"], queryFn: api.indexes });
   const docs = useQuery({ queryKey: ["documents", settings.index], queryFn: () => api.documents(settings.index) });
@@ -113,7 +162,7 @@ function Sidebar() {
     update({ sources: settings.sources.includes(source) ? settings.sources.filter((s) => s !== source) : [...settings.sources, source] });
 
   return (
-    <aside className="hidden w-64 shrink-0 flex-col gap-6 overflow-y-auto border-r border-border bg-surface p-4 md:flex">
+    <>
       <div>
         <label htmlFor="index-select" className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-text-muted">Index</label>
         <select
@@ -161,12 +210,29 @@ function Sidebar() {
         </ul>
         {list.length > 0 && settings.sources.length === 0 && <p className="mt-2 text-xs text-text-muted">Searching all documents. Click to narrow down.</p>}
       </div>
-    </aside>
+    </>
   );
 }
 
-function EmptyState({ onPick }: { onPick: (q: string) => void }) {
+function EmptyState({ onPick, docCount, index }: { onPick: (q: string) => void; docCount?: number; index: string }) {
   const examples = ["What is the main conclusion of the report?", "Summarize the outlook in three points.", "Which figures changed the most?"];
+  if (docCount === 0) {
+    return (
+      <div className="flex flex-col items-center pt-16 text-center animate-fade-in">
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-tint text-tint-text">
+          <UploadCloud size={22} />
+        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">No documents in “{index}” yet</h1>
+        <p className="mt-2 max-w-md text-text-muted">
+          Upload PDFs first; answers come only from them. (If you just changed the embedding model, re-upload: each
+          embedding model has its own index.)
+        </p>
+        <Link to="/documents" className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent hover:opacity-90">
+          <UploadCloud size={16} /> Upload documents
+        </Link>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col items-center pt-16 text-center animate-fade-in">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-tint text-tint-text">
@@ -189,19 +255,20 @@ function TurnView({ turn, onRetry, onOpen }: { turn: Turn; onRetry: () => void; 
   return (
     <article className="animate-fade-in" aria-busy={turn.status === "pending"}>
       <h2 className="mb-3 text-lg font-semibold leading-snug">{turn.question}</h2>
-      {turn.status === "pending" && <Thinking />}
+      {turn.status === "pending" && <Thinking searchOnly={turn.kind === "search"} />}
       {turn.status === "error" && (
         <div className="flex items-center gap-3">
           <Notice>{friendlyError(turn.error)}</Notice>
           <Button size="sm" onClick={onRetry}><RotateCcw size={14} /> Retry</Button>
         </div>
       )}
-      {turn.status === "done" && turn.answer && <AnswerView turn={turn} answer={turn.answer} onOpen={onOpen} />}
+      {turn.status === "done" && turn.kind === "answer" && turn.answer && <AnswerView turn={turn} answer={turn.answer} onOpen={onOpen} />}
+      {turn.status === "done" && turn.kind === "search" && <SearchResults results={turn.results ?? []} ms={turn.ms} onOpen={onOpen} />}
     </article>
   );
 }
 
-function Thinking() {
+function Thinking({ searchOnly = false }: { searchOnly?: boolean }) {
   const [phase, setPhase] = useState(0);
   useEffect(() => {
     const t = setTimeout(() => setPhase(1), 900);
@@ -209,7 +276,7 @@ function Thinking() {
   }, []);
   return (
     <div className="space-y-2.5" role="status">
-      <p className="text-sm text-text-muted">{phase === 0 ? "Searching your documents…" : "Writing the answer…"}</p>
+      <p className="text-sm text-text-muted">{phase === 0 || searchOnly ? "Searching your documents…" : "Writing the answer…"}</p>
       <div className="skeleton h-4 w-full" />
       <div className="skeleton h-4 w-11/12" />
       <div className="skeleton h-4 w-2/3" />
@@ -358,6 +425,42 @@ function SourcePanel({ opened, onClose }: { opened: Opened; onClose: () => void 
   );
 }
 
+/** Search-only mode: ranked passages straight from retrieval (no LLM); each opens its PDF page. */
+function SearchResults({ results, ms, onOpen }: { results: ChunkOut[]; ms?: number; onOpen: (o: Omit<Opened, "index">) => void }) {
+  if (results.length === 0) {
+    return (
+      <div className="flex items-start gap-3 rounded-xl border border-border bg-surface p-5">
+        <SearchX size={20} className="mt-0.5 shrink-0 text-text-muted" />
+        <div>
+          <p className="font-medium">No matching passages</p>
+          <p className="mt-1 text-sm text-text-muted">Try other words, or search all documents.</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-text-muted">
+        {results.length} passages · no AI used (free){ms != null ? ` · ${formatMs(ms)}` : ""}
+      </p>
+      {results.map((r, i) => (
+        <button
+          key={r.chunk_id ?? i}
+          onClick={() => onOpen({ source: r.source ?? "", page: r.page ?? 1, snippet: r.text, passage: r.text })}
+          className="block w-full rounded-xl border border-border bg-surface p-4 text-left transition-colors hover:border-accent"
+        >
+          <div className="flex flex-wrap items-center gap-2 text-xs text-text-muted">
+            <Badge tone="accent">{i + 1}</Badge>
+            <span className="font-medium text-text">{r.source}</span> · page {r.page}
+            <span className="ml-auto">{Object.entries(r.scores).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(" · ")}</span>
+          </div>
+          <p className="mt-2 line-clamp-4 text-sm leading-relaxed">{snippetText(r.text)}</p>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** Chunks overlap, so a snippet can start mid-word: mark that with an ellipsis. */
 function snippetText(s: string): string {
   const t = s.trim();
@@ -366,7 +469,10 @@ function snippetText(s: string): string {
 
 function QuestionBox({ onSubmit, busy, onClear }: { onSubmit: (q: string) => void; busy: boolean; onClear?: () => void }) {
   const [text, setText] = useState("");
-  const { reason } = useChosenModel();
+  const { settings, update } = useSettings();
+  const searchOnly = settings.askMode === "search";
+  const modelReason = useChosenModel().reason;
+  const reason = searchOnly ? undefined : modelReason; // search needs no model
   const ref = useRef<HTMLTextAreaElement>(null);
   const send = () => {
     const q = text.trim();
@@ -398,18 +504,33 @@ function QuestionBox({ onSubmit, busy, onClear }: { onSubmit: (q: string) => voi
                 send();
               }
             }}
-            placeholder="Ask a question about your documents…"
+            placeholder={searchOnly ? "Search your documents…" : "Ask a question about your documents…"}
             aria-label="Question"
             className="max-h-[200px] w-full resize-none bg-transparent px-1 text-[15px] leading-relaxed outline-none placeholder:text-text-muted"
           />
           <div className="mt-2 flex items-center justify-between gap-2">
-            <ModelPicker />
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented
+                ariaLabel="Answer or search only"
+                value={settings.askMode}
+                onChange={(askMode) => update({ askMode })}
+                options={[
+                  { id: "answer", label: "Ask", title: "An AI model answers from your documents, with citations" },
+                  { id: "search", label: "Search", title: "Find passages only: no AI, free and instant" },
+                ]}
+              />
+              {searchOnly ? (
+                <span className="inline-flex items-center gap-1 text-xs text-text-muted"><Search size={13} /> Passages only · free</span>
+              ) : (
+                <ModelPicker />
+              )}
+            </div>
             <div className="flex items-center gap-1">
               {onClear && <Button variant="ghost" size="sm" onClick={onClear}>Clear</Button>}
               <button
                 onClick={send}
                 disabled={!text.trim() || busy || !!reason}
-                aria-label="Ask"
+                aria-label={searchOnly ? "Search" : "Ask"}
                 className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-on-accent transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 <ArrowUp size={18} />
@@ -420,7 +541,7 @@ function QuestionBox({ onSubmit, busy, onClear }: { onSubmit: (q: string) => voi
         {reason ? (
           <p className="mt-2 text-xs text-warning">{reason}</p>
         ) : (
-          <p className="mt-2 hidden text-center text-xs text-text-muted sm:block">Enter to ask · Shift+Enter for a new line · / to focus</p>
+          <p className="mt-2 hidden text-center text-xs text-text-muted sm:block">Enter to {searchOnly ? "search" : "ask"} · Shift+Enter for a new line · / to focus</p>
         )}
       </div>
     </div>

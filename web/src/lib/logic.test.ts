@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError, type ModelOut } from "../api/client";
 import { ACCENTS, BASE, contrast, type Accent, type Mode } from "../theme";
-import { answerToMarkdown, costPerAnswer, friendlyError, matchItems, modelForTier, splitCitations } from "./logic";
+import { answerToMarkdown, costPerAnswer, friendlyError, matchItems, modelForTier, splitCitations, statusHealth } from "./logic";
 
 const m = (name: string, tier: string, inp: number, out: number, available = true): ModelOut => ({
   name, provider: "openai", tier, input_per_m: inp, output_per_m: out, available, reason: available ? null : "no key",
@@ -51,6 +51,8 @@ describe("friendlyError", () => {
     expect(friendlyError(new ApiError(502, "provider_error", "x"))).toContain("Try another model");
     expect(friendlyError(new ApiError(0, "network_error", "x"))).toContain("Can't reach the server");
     expect(friendlyError(new Error("boom"))).toBe("Something went wrong. Please try again.");
+    const emb = "Embedding with openai failed: the API key is invalid, revoked or missing (OPENAI_API_KEY).";
+    expect(friendlyError(new ApiError(502, "embedding_error", emb))).toBe(emb);  // not "try another model"
   });
 });
 
@@ -103,5 +105,22 @@ describe("matchItems (highlight the cited passage on the PDF page)", () => {
   it("handles empty input", () => {
     expect(matchItems(page, "").size).toBe(0);
     expect(matchItems([], "Growth is expected").size).toBe(0);
+  });
+});
+
+describe("statusHealth (header status pill)", () => {
+  const base = { index: "default", documents: 8, chunks: 44, embedding_ok: true, embedding_error: null, store_error: null,
+    llm_model: "gpt-4o-mini", llm_available: true, llm_reason: null } as const;
+  it("is green when documents, embeddings and model are fine", () => {
+    expect(statusHealth({ ...base })).toEqual({ tone: "ok", label: "8 docs" });
+  });
+  it("is red when embeddings fail (e.g. revoked key), even with documents", () => {
+    const h = statusHealth({ ...base, embedding_ok: false, embedding_error: "Embedding with openai failed: the API key is invalid" });
+    expect(h.tone).toBe("error");
+    expect(h.problem).toContain("API key");
+  });
+  it("warns about an empty index and an unavailable default model", () => {
+    expect(statusHealth({ ...base, documents: 0 }).label).toBe("No documents");
+    expect(statusHealth({ ...base, llm_available: false, llm_reason: "OPENAI_API_KEY not set" }).problem).toBe("OPENAI_API_KEY not set");
   });
 });

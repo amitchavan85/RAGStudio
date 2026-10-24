@@ -14,6 +14,7 @@ export type Settings = {
   reranker: "none" | "cross_encoder" | null;
   chunking: string | null;
   sources: string[]; // document filter; [] = all documents
+  askMode: "answer" | "search"; // search = passages only, no LLM call (free, instant)
 };
 
 const DEFAULTS: Settings = {
@@ -27,6 +28,7 @@ const DEFAULTS: Settings = {
   reranker: null,
   chunking: null,
   sources: [],
+  askMode: "answer",
 };
 
 const STORAGE = "rag.settings";

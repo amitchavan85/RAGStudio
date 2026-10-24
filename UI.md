@@ -48,7 +48,7 @@ Stack: React + TypeScript (Vite), TanStack Query, `pdf.js`, typed API client gen
 - Keyboard: `/` focuses the question box, `Ctrl+Enter` asks.
 - Accessible: keyboard navigation, screen-reader-friendly citations, WCAG AA contrast.
 
-**Implemented (2026-10-13):** Release 1 (features 1-13) + PDF viewer (14) + settings panel (16) + copy as Markdown (18) + session history (19). Also done: the cited passage is highlighted on the PDF page (14). Not yet: streaming (15), search-only mode (17), Release 3.
+**Implemented (2026-10-15):** Release 1 (features 1-13) + PDF viewer with highlighted passage (14) + settings panel (16) + search-only mode (17) + copy as Markdown (18) + session history (19). Not yet: streaming (15), Release 3.
 
 ## Run it
 
@@ -83,6 +83,8 @@ Web scripts (in `web/`): `npm run typecheck`, `npm test` (Vitest), `npm run buil
 ## Verified
 - Typecheck, 21 unit tests (including a WCAG AA contrast check of every accent in light and dark), production build (main bundle 135 KB gzip; pdf.js loaded only when a PDF is opened).
 - In a real browser (Edge, headless, light and dark): ask -> answer with citation chips in ~2-3 s -> click a citation -> the PDF opens at the cited page; Documents page lists and views files; no browser errors.
+- Search-only mode (Ask | Search toggle next to the question box): ranked passages with per-stage scores in ~0.3 s, no LLM request (checked in the browser: only `POST /v1/search` is sent); clicking a passage opens the PDF with it highlighted.
+- Quick wins (2026-10-24): a **status pill** in the header (green / amber / red: documents, embeddings, default model; details popover); an **empty-index screen** linking to uploads; a **phone-width drawer** for index and document filter (no horizontal scrolling at 390 px); grouped citations like `[5, 8]` (common with small local models) are normalized to `[5][8]` on the server so every citation is clickable. Found while testing: the first page load after an API start waited ~30 s for the embedding model (now warmed up in the background at startup), and a revoked OpenAI key still showed models as available (keys are now validated).
 - Bugs found that way and fixed: the PDF worker was served as `text/plain` on Windows (browsers refuse module scripts with that type); unknown `/v1/...` URLs returned the web page instead of a JSON 404.
 - **Passage highlighting:** the full cited chunk (not the 300-character snippet) is matched against the page's text layer: every 3 consecutive words that also appear in order on the page are marked, and only continuous stretches of at least 8 marked words are kept. In the browser this highlighted exactly the cited paragraph on a two-column World Bank page and the cited table rows on a GDP page. The first version (without the stretch rule) also lit up common phrases elsewhere on the page ("is expected to", "Over 2027-28"); the stretch rule removed them. If nothing matches (e.g. OCR'd pages), the viewer says "Passage not located on this page" and the passage stays visible above the page.
 - Known small issue: a cited passage can start mid-word because chunks overlap ("S Dollar ..."); lowercase starts get an ellipsis.

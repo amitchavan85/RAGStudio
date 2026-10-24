@@ -5,6 +5,11 @@ from abc import ABC, abstractmethod
 from typing import List
 
 
+class EmbeddingError(RuntimeError):
+    """Turning text into vectors failed (e.g. the embedding API key is invalid). Raised by the
+    pipeline so callers can tell an embedding problem apart from an LLM problem."""
+
+
 class EmbeddingProvider(ABC):
     """Turns text into dense vectors. `dimension` is needed to create stores."""
 

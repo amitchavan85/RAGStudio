@@ -150,3 +150,24 @@ def test_failed_ingest_keeps_previous_version(rag, monkeypatch):
 def test_empty_question_rejected(rag):
     with pytest.raises(ValueError):
         rag.query("   ")
+
+
+class AuthenticationError(Exception):
+    """Stands in for openai.AuthenticationError (matched by class name)."""
+
+
+def test_embedding_failure_is_reported_as_embedding_error_with_a_fix(rag, monkeypatch):
+    from src.embeddings import EmbeddingError
+
+    rag.ingest(USA)
+
+    def revoked(*a, **k):
+        raise AuthenticationError("Error code: 401 - Your API key has been invalidated.")
+
+    monkeypatch.setattr(rag.embedder, "embed_query", revoked)
+    monkeypatch.setattr(rag.embedder, "embed_documents", revoked)
+    with pytest.raises(EmbeddingError, match="API key is invalid"):
+        rag.query("GDP", mode="hybrid")
+    with pytest.raises(EmbeddingError, match="Embedding with .* failed"):
+        rag.ingest(IND)
+    assert rag.query("27,360", mode="keyword")  # keyword search needs no embeddings and still works

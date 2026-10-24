@@ -1,5 +1,5 @@
 """Embedding providers. `get_embedder()` builds one by name."""
-from src.embeddings.base import EmbeddingProvider
+from src.embeddings.base import EmbeddingError, EmbeddingProvider
 
 
 def get_embedder(provider: str | None = None, model: str | None = None) -> EmbeddingProvider:
@@ -18,4 +18,4 @@ def get_embedder(provider: str | None = None, model: str | None = None) -> Embed
     raise ValueError(f"Unknown embedding provider: {provider!r}")
 
 
-__all__ = ["EmbeddingProvider", "get_embedder"]
+__all__ = ["EmbeddingError", "EmbeddingProvider", "get_embedder"]

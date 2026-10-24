@@ -6,7 +6,7 @@ import logging
 import os
 
 import pytest
-from helpers import PDF_DIR
+from helpers import PDF_DIR, provider_problem
 
 from src.chunking.agentic import AgenticChunker
 from src.config import Settings
@@ -14,9 +14,8 @@ from src.ingestion.loader import load_pdf_directory
 from src.llm import get_llm_fn
 
 
-pytestmark = pytest.mark.skipif(
-    not Settings().openai_api_key.get_secret_value(), reason="OPENAI_API_KEY not set in .env or environment"
-)
+_PROBLEM = provider_problem("openai")
+pytestmark = pytest.mark.skipif(_PROBLEM is not None, reason=f"live OpenAI test: {_PROBLEM}")
 
 
 def test_real_llm_chunks_pages_without_fallback_and_without_losing_numbers(caplog):

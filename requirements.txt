@@ -6,6 +6,9 @@ tenacity>=8.2
 # Embeddings + local reranker
 sentence-transformers>=2.7
 
+# Exact LLM token counts for the `token` chunker (without it: a word-based estimate, ~30% low on numeric text)
+tiktoken>=0.7
+
 # LLM providers (OpenAI also serves embeddings when EMBEDDING_PROVIDER=openai)
 openai>=1.30
 anthropic>=1.0

@@ -1,5 +1,5 @@
 /** Pure logic shared by components (unit-tested in logic.test.ts). */
-import { ApiError, type ModelOut } from "../api/client";
+import { ApiError, type ModelOut, type StatusOut } from "../api/client";
 
 // ---------- citations ----------
 
@@ -66,6 +66,9 @@ export function friendlyError(err: unknown): string {
       return `You're sending requests too quickly. Try again in ${retry ?? "a few"} seconds.`;
     case "provider_error":
       return "The AI provider isn't responding right now. Try another model.";
+    case "embedding_error":
+      // Not an LLM problem: the server explains which embedding provider failed and how to fix it.
+      return err.message;
     case "refused":
       return "The model declined to answer this question.";
     case "store_unavailable":
@@ -135,4 +138,18 @@ export function matchItems(items: string[], passage: string, n = 3, minRun = 8):
     start = end;
   }
   return hits;
+}
+
+// ---------- status pill ----------
+
+export type Health = { tone: "ok" | "warn" | "error"; label: string; problem?: string };
+
+/** One-glance health of the selected index: can a question be answered right now? */
+export function statusHealth(s: StatusOut): Health {
+  if (s.store_error) return { tone: "error", label: "Database unavailable", problem: s.store_error };
+  if (!s.embedding_ok) return { tone: "error", label: "Embeddings failing", problem: s.embedding_error ?? undefined };
+  if (s.documents === 0) return { tone: "warn", label: "No documents", problem: "Upload PDFs to this index first." };
+  if (s.llm_available === false)
+    return { tone: "warn", label: "Default model unavailable", problem: s.llm_reason ?? "Pick another model in the question box." };
+  return { tone: "ok", label: `${s.documents ?? 0} docs` };
 }

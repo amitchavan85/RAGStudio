@@ -10,7 +10,42 @@ services:
       POSTGRES_DB: rag
     ports: ["5432:5432"]
     volumes: ["pg_data:/var/lib/postgresql/data"]
-  # RAG API. Start with: docker compose up -d --build api   (docs: http://localhost:8000/docs)
+    shm_size: 1gb   # Docker's default 64 MB is too small for parallel HNSW index builds (pgvector bulk load)
+
+  # Local LLMs (free, private). Start with: docker compose --profile ollama up -d
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama", "api"]
+    ports: ["11435:11434"]    # host port 11435: avoids the Ollama already installed on this machine (11434)
+    volumes: ["ollama_models:/root/.ollama"]   # pulled models survive restarts and rebuilds
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    # NVIDIA GPU (much faster): uncomment; needs the NVIDIA Container Toolkit (Docker Desktop: WSL2 + NVIDIA driver)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  # One-shot job: pulls the models in OLLAMA_MODELS (space separated) into the ollama volume, then exits.
+  # Already-pulled models are skipped quickly. Change the list in .env, e.g. OLLAMA_MODELS="llama3.2:3b qwen2.5:7b".
+  ollama-pull:
+    image: ollama/ollama:latest
+    profiles: ["ollama", "api"]
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["/bin/sh", "-c", "for m in $${OLLAMA_MODELS:-llama3.2:3b}; do echo pulling $$m; ollama pull $$m || exit 1; done"]
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  # RAG API + web UI. Start with: docker compose --profile api up -d --build   (UI: http://localhost:8000)
   api:
     build: .
     profiles: ["api"]          # not started by a plain `docker compose up`; use --profile api or name it
@@ -22,7 +57,9 @@ services:
       LOG_DIR: /data/logs
       API_HOST: 0.0.0.0
       API_PORT: "8000"
-      OLLAMA_URL: http://host.docker.internal:11434   # Ollama running on the host machine
+      # The Ollama container above. For an Ollama installed on the host instead, set
+      # DOCKER_OLLAMA_URL=http://host.docker.internal:11434 in your shell or .env.
+      OLLAMA_URL: ${DOCKER_OLLAMA_URL:-http://ollama:11434}
     ports: ["8000:8000"]
     volumes: ["api_data:/data"]
     depends_on: [qdrant, postgres]
@@ -30,3 +67,4 @@ volumes:
   qdrant_data:
   pg_data:
   api_data:
+  ollama_models:
